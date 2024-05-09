@@ -4,7 +4,7 @@ use cosmic_settings_daemon::{ConfigProxyBlocking, CosmicSettingsDaemonProxyBlock
 use cosmic_theme::{Theme, ThemeBuilder, ThemeMode};
 use image::GenericImageView;
 use kmeans_colors::{get_kmeans, Kmeans, Sort};
-use palette::color_difference::{Ciede2000, HyAb, Wcag21RelativeContrast};
+use palette::color_difference::Wcag21RelativeContrast;
 use palette::{Clamp, FromColor, IntoColor, Lab, Lch, Srgb, SrgbLuma, Srgba};
 use serde::{Deserialize, Serialize};
 use zbus::blocking::Connection;
@@ -146,20 +146,49 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
         },
     };
 
-    let mut accent = (kmeans.centroids[0], kmeans.centroids[0]);
+    let clay_brown: Lch = Srgb::new(0.54, 0.38, 0.28).into_color();
+    let muddy_brown: Lch = Srgb::new(0.47, 0.34, 0.14).into_color();
+    let brown: Lch = Srgb::new(0.56078, 0.40784, 0.17647).into_color();
+    let gross_yellow: Lch = Srgb::new(0.439, 0.431, 0.078).into_color();
+    let gross_green: Lch = Srgb::new(0.47, 0.51, 0.32).into_color();
+    let avoid = vec![clay_brown, muddy_brown, brown, gross_yellow, gross_green];
+
+    let mut accent: (Lab, Lch) = (kmeans.centroids[0], kmeans.centroids[0].into_color());
     let mut best = f32::MIN;
     for color in &kmeans.centroids {
         let adjusted = adjust_lightness_for_contrast(
             (*color).into_color(),
             default.background.base.into_color(),
         );
-        let score = adjusted.chroma;
+        let mut score = adjusted.chroma;
+        if avoid.iter().any(|c| {
+            let hue_diff = (adjusted.hue.into_inner() - c.hue.into_inner()).abs() % 180.;
+            (adjusted.chroma - c.chroma).powf(2.) + (hue_diff).powf(2.) < 666. && hue_diff < 20.
+        }) {
+            score /= 10.;
+        }
         if score > best {
             best = score;
-            accent = (*color, adjusted.into_color());
+            accent = (*color, adjusted);
         }
     }
-    kmeans.centroids.retain(|c| c.hybrid_distance(accent.0) > 20.);
+    let max_hue_diff = kmeans
+        .centroids
+        .iter()
+        .map(|c| {
+            let c = Lch::from_color(*c);
+            (c.hue - accent.1.hue).into_inner().abs()
+        })
+        .max_by(|a, b| a.total_cmp(b))
+        .unwrap();
+    kmeans.centroids.retain(|c| {
+        let c = Lch::from_color(*c);
+        (c.hue - accent.1.hue).into_inner().abs() > max_hue_diff / 6.
+    });
+    res.retain(|c| {
+        let c = Lch::from_color(c.centroid);
+        (c.hue - accent.1.hue).into_inner().abs() > max_hue_diff / 6.
+    });
 
     let accent = Srgb::from_color(accent.1);
     t = t.accent(accent);
@@ -247,7 +276,7 @@ fn adjust_lightness_for_contrast(original: Lch, b: Lch) -> Lch {
     let filtered = c_arr.iter().filter(|c| c.1 > 4.5).cloned().collect::<Vec<(Lch, f32)>>();
     filtered
         .into_iter()
-        .max_by(|a, b| b.0.chroma.total_cmp(&a.0.chroma))
+        .min_by(|a, b| (a.0.l - original.l).abs().total_cmp(&(b.0.l - original.l).abs()))
         .map(|(c, _)| c)
         .unwrap_or_else(|| {
             c_arr
