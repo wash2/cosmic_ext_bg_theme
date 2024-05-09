@@ -89,7 +89,17 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
         anyhow::bail!("No wallpaper path");
     };
 
-    let p = path.to_string_lossy().replace("/", "_");
+    let t = match cosmic_theme::ThemeMode::get_entry(&ThemeMode::config()?) {
+        Ok(entry) => entry,
+        Err((errs, entry)) => {
+            for err in errs {
+                eprintln!("Failed to get the current theme mode: {}", err);
+            }
+            entry
+        },
+    };
+
+    let p = format!("{}_{}", path.to_string_lossy().replace("/", "_"), t.is_dark);
     if use_saved_result(&p).is_ok() {
         return Ok(());
     }
@@ -107,7 +117,7 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
     let seed = 42;
     // TODO elbow method
     let mut best_result = Kmeans::new();
-    for i in 0..4 {
+    for i in 0..2 {
         let run_result = get_kmeans(8, 40, 10., false, &img, seed + i as u64);
         if run_result.score < best_result.score {
             best_result = run_result;
@@ -116,16 +126,6 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
     results.push(best_result);
 
     let kmeans = results.last().unwrap();
-
-    let t = match cosmic_theme::ThemeMode::get_entry(&ThemeMode::config()?) {
-        Ok(entry) => entry,
-        Err((errs, entry)) => {
-            for err in errs {
-                eprintln!("Failed to get the current theme mode: {}", err);
-            }
-            entry
-        },
-    };
 
     let (builder_config, default) = if t.is_dark {
         (ThemeBuilder::dark_config()?, Theme::dark_default())
