@@ -55,7 +55,6 @@ install:
 		sed -i 's/graphical.target/graphical-session.target/g' $(SERVICE_FILE); \
 		systemctl --user daemon-reload; \
 	else \
-		echo "Requesting sudo access to reload systemd user units..."; \
 		systemctl daemon-reload; \
 	fi
 
@@ -63,7 +62,6 @@ install:
 	if [ "$(SERVICE_DIR)" = "$(HOME)/.config/systemd/user" ]; then \
 		systemctl --user enable --now $(SERVICE_NAME); \
 	else \
-		echo "Requesting sudo access to enable and start the service..."; \
 		systemctl enable --now $(SERVICE_FILE); \
 	fi
 
@@ -74,7 +72,6 @@ uninstall:
 	if [ "$(SERVICE_DIR)" = "$(HOME)/.config/systemd/user" ]; then \
 		systemctl --user disable --now $(SERVICE_NAME); \
 	else \
-		echo "Requesting sudo access to disable and stop the service..."; \
 		systemctl disable --now $(SERVICE_FILE); \
 	fi
 
@@ -85,7 +82,6 @@ uninstall:
 	if [ "$(SERVICE_DIR)" = "$(HOME)/.config/systemd/user" ]; then \
 		systemctl --user daemon-reload; \
 	else \
-		echo "Requesting sudo access to reload systemd user units..."; \
 		systemctl daemon-reload; \
 	fi
 

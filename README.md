@@ -13,6 +13,8 @@ Unofficial service for syncing COSMIC theme with the active wallpaper.
 
 `make all && make install`
 
+NOTE: debian build currently doesn't work.
+
 ## License
 
 GPL-3.0-only
