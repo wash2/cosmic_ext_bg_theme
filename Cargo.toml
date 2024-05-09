@@ -1,0 +1,20 @@
+[package]
+name = "cosmic_bg_theme"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "cosmic-bg-theme"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+image = "0.25"
+zbus = { version = "3" }
+cosmic-bg-config = { git = "https://github.com/pop-os/cosmic-bg" }
+cosmic-config = { git = "https://github.com/pop-os/libcosmic" }
+cosmic-theme = { git = "https://github.com/pop-os/libcosmic" }
+cosmic-settings-daemon = { git = "https://github.com/pop-os/dbus-settings-bindings" }
+kmeans_colors = { version = "0.6", features = ["palette_color"] }
+palette = { version = "0.7.3", features = ["serializing"] }
+serde = { version = "1.0", features = ["derive"] }

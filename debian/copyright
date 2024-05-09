@@ -1,0 +1,7 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: cosmic_bg_theme
+Upstream-Contact: Ashley Wulber <ashley.wulber@pm.me>
+Source: https://github.com/wash2/cosmic_bg_theme
+Files: *
+Copyright: Ashley Wulber <ashley.wulber@pm.me>
+License: GPL-3.0-only

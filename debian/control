@@ -1,0 +1,17 @@
+Source: cosmic-bg-theme
+Section: x11
+Priority: optional
+Maintainer: Ashley Wulber <ashley.wulber@pm.me>
+Build-Depends: cargo,
+  cmake,
+  debhelper-compat (=10),
+  rustc (>=1.57),
+Standards-Version: 4.1.1
+Homepage: https://github.com/wash2/cosmic_bg_theme
+
+Package: cosmic-bg-theme
+Architecture: amd64 arm64
+Depends: ${misc:Depends},
+  ${shlibs:Depends},
+Recommends: cosmic-session,
+Description: Unofficial service for syncing COSMIC theme with the active wallpaper
