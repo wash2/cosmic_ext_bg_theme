@@ -4,7 +4,8 @@ use cosmic_settings_daemon::{ConfigProxyBlocking, CosmicSettingsDaemonProxyBlock
 use cosmic_theme::{Theme, ThemeBuilder, ThemeMode};
 use image::GenericImageView;
 use kmeans_colors::{get_kmeans, Kmeans, Sort};
-use palette::{FromColor, IntoColor, Lab, Lch, Srgb, Srgba};
+use palette::color_difference::{Ciede2000, HyAb, Wcag21RelativeContrast};
+use palette::{Clamp, FromColor, IntoColor, Lab, Lch, Srgb, SrgbLuma, Srgba};
 use serde::{Deserialize, Serialize};
 use zbus::blocking::Connection;
 
@@ -125,7 +126,9 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
     }
     results.push(best_result);
 
-    let kmeans = results.last().unwrap();
+    let mut kmeans = results.into_iter().last().unwrap();
+    let mut res = Lab::sort_indexed_colors(&kmeans.centroids, &kmeans.indices);
+    res.sort_unstable_by(|a, b| (b.percentage).total_cmp(&a.percentage));
 
     let (builder_config, default) = if t.is_dark {
         (ThemeBuilder::dark_config()?, Theme::dark_default())
@@ -143,38 +146,33 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
         },
     };
 
-    let default_accent = Lch::from_color(default.accent.base);
-    let mut accent = kmeans.centroids[0];
+    let mut accent = (kmeans.centroids[0], kmeans.centroids[0]);
     let mut best = f32::MIN;
     for color in &kmeans.centroids {
-        let lch = Lch::from_color(*color);
-        let score = lch.chroma;
+        let adjusted = adjust_lightness_for_contrast(
+            (*color).into_color(),
+            default.background.base.into_color(),
+        );
+        let score = adjusted.chroma;
         if score > best {
             best = score;
-            accent = *color;
+            accent = (*color, adjusted.into_color());
         }
     }
+    kmeans.centroids.retain(|c| c.hybrid_distance(accent.0) > 20.);
 
-    if (default_accent.l - accent.l).abs() > 20. {
-        accent.l = default_accent.l;
-    }
-
-    let accent = Srgb::from_color(accent);
+    let accent = Srgb::from_color(accent.1);
     t = t.accent(accent);
 
     let default_window_bg = Lch::from_color(default.background.base);
 
     let mut nearest_to_window_bg = find_nearest_lch(default_window_bg, &kmeans.centroids);
-
-    if (default_window_bg.l - nearest_to_window_bg.l).abs() > 10. {
-        nearest_to_window_bg.l = default_window_bg.l;
-    }
+    nearest_to_window_bg =
+        adjust_lightness_for_contrast(nearest_to_window_bg, default.background.on.into_color());
 
     t = t.bg_color(nearest_to_window_bg.into_color());
 
     // use most common color for the neutral color
-    let mut res = Lab::sort_indexed_colors(&kmeans.centroids, &kmeans.indices);
-    res.sort_unstable_by(|a, b| (b.percentage).total_cmp(&a.percentage));
     let mut neutral = default.palette.neutral_5;
 
     for c in res {
@@ -210,7 +208,11 @@ fn find_nearest_lch(c: Lch, colors: &[Lab]) -> Lch {
     let mut best = f32::MAX;
     let mut nearest = c;
     for color in colors {
-        let lch = Lch::from_color(*color);
+        let mut lch = Lch::from_color(*color);
+        if (lch.l - c.l).abs() > 20. {
+            lch.l = c.l;
+        }
+
         let score = (c.l - lch.l).abs() + (c.chroma - lch.chroma).abs();
         if score < best {
             best = score;
@@ -218,6 +220,43 @@ fn find_nearest_lch(c: Lch, colors: &[Lab]) -> Lch {
         }
     }
     nearest
+}
+
+// binary search modifying a's lightness to satisfy contrast with b
+fn adjust_lightness_for_contrast(original: Lch, b: Lch) -> Lch {
+    let a_luma = SrgbLuma::from_color(original);
+    let b_luma = SrgbLuma::from_color(b);
+
+    if a_luma.has_min_contrast_text(b_luma) {
+        return original;
+    }
+
+    let c_arr: Vec<(Lch, f32)> = (0..=40)
+        .into_iter()
+        .map(|i| {
+            let mut c = original;
+            c.l = 100. * i as f32 / 40.;
+            c.clamp()
+        })
+        .map(|c| {
+            let c_luma = SrgbLuma::from_color(c);
+            let contrast = c_luma.relative_contrast(b_luma);
+            (c, contrast)
+        })
+        .collect();
+    let filtered = c_arr.iter().filter(|c| c.1 > 4.5).cloned().collect::<Vec<(Lch, f32)>>();
+    filtered
+        .into_iter()
+        .max_by(|a, b| b.0.chroma.total_cmp(&a.0.chroma))
+        .map(|(c, _)| c)
+        .unwrap_or_else(|| {
+            c_arr
+                .into_iter()
+                .max_by(|a_1, a_2| a_1.1.total_cmp(&a_2.1))
+                .map(|(c, _)| c)
+                .unwrap_or(original)
+        })
+        .clone()
 }
 
 fn use_saved_result(path: &str) -> anyhow::Result<()> {
