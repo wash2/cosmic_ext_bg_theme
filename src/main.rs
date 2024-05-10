@@ -249,7 +249,7 @@ fn find_nearest_lch(c: Lch, colors: &[Lab]) -> Lch {
     let mut nearest = c;
     for color in colors {
         let mut lch = Lch::from_color(*color);
-        if (lch.l - c.l).abs() > 20. {
+        if (lch.l - c.l).abs() > 3. {
             lch.l = c.l;
         }
 
