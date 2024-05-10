@@ -90,7 +90,8 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
         anyhow::bail!("No wallpaper path");
     };
 
-    let t = match cosmic_theme::ThemeMode::get_entry(&ThemeMode::config()?) {
+    let theme_mode_config = ThemeMode::config()?;
+    let t = match cosmic_theme::ThemeMode::get_entry(&theme_mode_config) {
         Ok(entry) => entry,
         Err((errs, entry)) => {
             for err in errs {
@@ -217,17 +218,27 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
     t.write_entry(&builder_config)?;
 
     let result = BgResult { accent, bg: t.bg_color.unwrap(), neutral: t.neutral_tint.unwrap() };
-
+    let my_config = cosmic_config::Config::new_state(ID, 1)?;
+    if let Err(err) = my_config.set(&p, result) {
+        eprintln!("Failed to save the result: {}", err);
+    }
+    let is_dark_still = match ThemeMode::get_entry(&theme_mode_config) {
+        Ok(entry) => entry.is_dark,
+        Err((errs, entry)) => {
+            for err in errs {
+                eprintln!("Failed to get the current theme mode: {}", err);
+            }
+            entry.is_dark
+        },
+    };
     let theme = t.build();
 
     let theme_config = if theme.is_dark { Theme::dark_config() } else { Theme::light_config() }?;
 
     theme.write_entry(&theme_config)?;
 
-    let my_config = cosmic_config::Config::new_state(ID, 1)?;
-
-    if let Err(err) = my_config.set(&p, result) {
-        eprintln!("Failed to save the result: {}", err);
+    if is_dark_still != default.is_dark {
+        return apply_state(state);
     }
 
     Ok(())
