@@ -8,13 +8,23 @@ name = "cosmic-bg-theme"
 path = "src/main.rs"
 
 [dependencies]
+tracing-subscriber = { version = "0.3.18", features = [
+    "fmt",
+    "env-filter",
+    "ansi",
+] }
+tracing = "0.1.26"
+tokio = { version = "1.37", features = ["full"] }
 anyhow = "1"
+futures = "0.3"
 image = "0.25"
-zbus = { version = "3" }
+zbus = { version = "3", default-features = false, features = ["tokio"] }
 cosmic-bg-config = { git = "https://github.com/pop-os/cosmic-bg" }
 cosmic-config = { git = "https://github.com/pop-os/libcosmic" }
 cosmic-theme = { git = "https://github.com/pop-os/libcosmic" }
 cosmic-settings-daemon = { git = "https://github.com/pop-os/dbus-settings-bindings" }
 kmeans_colors = { version = "0.6", features = ["palette_color"] }
+log-panics = { version = "2.1", features = ["with-backtrace"] }
 palette = { version = "0.7.3", features = ["serializing"] }
 serde = { version = "1.0", features = ["derive"] }
+tracing-journald = "0.3.0"

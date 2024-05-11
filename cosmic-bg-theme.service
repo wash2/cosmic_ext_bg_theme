@@ -6,7 +6,7 @@ After=graphical.target
 Type=simple
 ExecStart=/path/to/your/executable
 Restart=always
-RestartSec=3
+RestartSec=5
 
 [Install]
 WantedBy=graphical.target

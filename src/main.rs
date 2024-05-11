@@ -1,41 +1,78 @@
 use cosmic_bg_config::state::State;
 use cosmic_config::{ConfigGet, ConfigSet, CosmicConfigEntry};
-use cosmic_settings_daemon::{ConfigProxyBlocking, CosmicSettingsDaemonProxyBlocking};
-use cosmic_theme::{Theme, ThemeBuilder, ThemeMode};
+use cosmic_settings_daemon::{ConfigProxy, CosmicSettingsDaemonProxy};
+use cosmic_theme::{Theme, ThemeBuilder};
+use futures::stream::Stream;
+use futures::StreamExt;
 use image::GenericImageView;
 use kmeans_colors::{get_kmeans, Kmeans, Sort};
 use palette::color_difference::Wcag21RelativeContrast;
 use palette::{Clamp, FromColor, IntoColor, Lab, Lch, Srgb, SrgbLuma, Srgba};
 use serde::{Deserialize, Serialize};
-use zbus::blocking::Connection;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt, EnvFilter};
+use zbus::Connection;
 
 const ID: &str = "gay.ash.CosmicBgTheme";
 
-fn main() -> anyhow::Result<()> {
-    let settings_proxy = connect_settings_daemon()?;
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let fmt_layer = fmt::layer().with_target(false);
+    let filter_layer =
+        EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("info")).unwrap();
+    if let Ok(journal_layer) = tracing_journald::layer() {
+        tracing_subscriber::registry().with(journal_layer).with(filter_layer).init();
+    } else {
+        tracing_subscriber::registry().with(fmt_layer).with(filter_layer).init();
+    }
+
+    log_panics::init();
+    tracing::info!("Starting CosmicBgTheme");
+    let settings_proxy = connect_settings_daemon().await?;
     let config = State::state()?;
-    let (path, name) = settings_proxy.watch_state(cosmic_bg_config::NAME, State::version())?;
-    let bg_state_proxy = ConfigProxyBlocking::builder(settings_proxy.connection())
+    let (path, name) = settings_proxy.watch_state(cosmic_bg_config::NAME, State::version()).await?;
+    let bg_state_proxy = ConfigProxy::builder(settings_proxy.connection())
         .path(path)?
         .destination(name)?
-        .build()?;
+        .build()
+        .await?;
 
     let mut state = match State::get_entry(&config) {
         Ok(entry) => entry,
         Err((errs, entry)) => {
             for err in errs {
-                eprintln!("Failed to get the current state: {}", err);
+                tracing::error!("Failed to get the current state: {}", err);
             }
             entry
         },
     };
 
-    if let Err(err) = apply_state(&state) {
-        eprintln!("Failed to apply the state: {}", err);
+    if let Err(err) = apply_state(&state, true) {
+        tracing::error!("Failed to apply the state: {}", err);
     }
-    let changes = bg_state_proxy.receive_changed()?;
+    if let Err(err) = apply_state(&state, false) {
+        tracing::error!("Failed to apply the state: {}", err);
+    }
+    let mut changes = bg_state_proxy.receive_changed().await?;
 
-    for c in changes {
+    let mut ownership_change = settings_proxy.receive_owner_changed().await?;
+
+    loop {
+        let c = tokio::select! {
+            c = changes.next() => c,
+            c = ownership_change.next() => {
+                if c.is_none() {
+                    // The settings daemon has exited
+                    std::process::exit(0);
+                } else {
+                    None
+                }
+            },
+        };
+        let c = match c {
+            Some(c) => c,
+            None => break,
+        };
         let Ok(args) = c.args() else {
             continue;
         };
@@ -44,23 +81,26 @@ fn main() -> anyhow::Result<()> {
             continue;
         }
         for err in errors {
-            eprintln!("Failed to update the state: {}", err);
+            tracing::error!("Failed to update the state: {}", err);
         }
 
-        if let Err(err) = apply_state(&state) {
-            eprintln!("Failed to apply the state: {}", err);
+        if let Err(err) = apply_state(&state, true) {
+            tracing::error!("Failed to apply the state: {}", err);
+        }
+        if let Err(err) = apply_state(&state, false) {
+            tracing::error!("Failed to apply the state: {}", err);
         }
     }
 
     Ok(())
 }
 
-fn load_conn() -> anyhow::Result<Connection> {
+async fn load_conn() -> anyhow::Result<Connection> {
     for _ in 0..5 {
-        match Connection::session() {
+        match Connection::session().await {
             Ok(conn) => return Ok(conn),
             Err(e) => {
-                eprintln!("Failed to connect to the session bus: {}", e);
+                tracing::error!("Failed to connect to the session bus: {}", e);
                 std::thread::sleep(std::time::Duration::from_secs(1));
             },
         }
@@ -68,13 +108,13 @@ fn load_conn() -> anyhow::Result<Connection> {
     Err(anyhow::anyhow!("Failed to connect to the session bus"))
 }
 
-fn connect_settings_daemon() -> anyhow::Result<CosmicSettingsDaemonProxyBlocking<'static>> {
-    let conn = load_conn()?;
+async fn connect_settings_daemon() -> anyhow::Result<CosmicSettingsDaemonProxy<'static>> {
+    let conn = load_conn().await?;
     for _ in 0..5 {
-        match CosmicSettingsDaemonProxyBlocking::builder(&conn).build() {
+        match CosmicSettingsDaemonProxy::builder(&conn).build().await {
             Ok(proxy) => return Ok(proxy),
             Err(e) => {
-                eprintln!("Failed to connect to the settings daemon: {}", e);
+                tracing::error!("Failed to connect to the settings daemon: {}", e);
                 std::thread::sleep(std::time::Duration::from_secs(1));
             },
         }
@@ -82,7 +122,7 @@ fn connect_settings_daemon() -> anyhow::Result<CosmicSettingsDaemonProxyBlocking
     Err(anyhow::anyhow!("Failed to connect to the settings daemon"))
 }
 
-fn apply_state(state: &State) -> anyhow::Result<()> {
+fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
     let Some(w) = state.wallpapers.get(0) else {
         anyhow::bail!("No wallpapers found");
     };
@@ -90,19 +130,8 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
         anyhow::bail!("No wallpaper path");
     };
 
-    let theme_mode_config = ThemeMode::config()?;
-    let t = match cosmic_theme::ThemeMode::get_entry(&theme_mode_config) {
-        Ok(entry) => entry,
-        Err((errs, entry)) => {
-            for err in errs {
-                eprintln!("Failed to get the current theme mode: {}", err);
-            }
-            entry
-        },
-    };
-
-    let p = format!("{}_{}", path.to_string_lossy().replace("/", "_"), t.is_dark);
-    if use_saved_result(&p).is_ok() {
+    let p = format!("{}_{}", path.to_string_lossy().replace("/", "_"), is_dark);
+    if use_saved_result(&p, is_dark).is_ok() {
         return Ok(());
     }
 
@@ -131,7 +160,7 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
     let mut res = Lab::sort_indexed_colors(&kmeans.centroids, &kmeans.indices);
     res.sort_unstable_by(|a, b| (b.percentage).total_cmp(&a.percentage));
 
-    let (builder_config, default) = if t.is_dark {
+    let (builder_config, default) = if is_dark {
         (ThemeBuilder::dark_config()?, Theme::dark_default())
     } else {
         (ThemeBuilder::light_config()?, Theme::light_default())
@@ -141,12 +170,28 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
         Ok(entry) => entry,
         Err((errs, entry)) => {
             for err in errs {
-                eprintln!("Failed to get the dark theme: {}", err);
+                tracing::error!("Failed to get the dark theme: {}", err);
             }
             entry
         },
     };
 
+    // BG
+    let default_window_bg = Lch::from_color(default.background.base);
+
+    let new_window_bg = res.remove(0).centroid;
+    kmeans.centroids.retain(|c| c != &new_window_bg.into_color());
+    let mut new_window_bg: Lch = new_window_bg.into_color();
+    if (new_window_bg.chroma - default_window_bg.chroma).abs() > 15. {
+        new_window_bg.chroma = default_window_bg.chroma + 15.;
+        new_window_bg = new_window_bg.clamp();
+    }
+    new_window_bg =
+        adjust_lightness_for_contrast(new_window_bg, default.accent.base.into_color(), 6.);
+
+    t = t.bg_color(new_window_bg.into_color());
+
+    // ACCENT
     let clay_brown: Lch = Srgb::new(0.54, 0.38, 0.28).into_color();
     let muddy_brown: Lch = Srgb::new(0.47, 0.34, 0.14).into_color();
     let brown: Lch = Srgb::new(0.56078, 0.40784, 0.17647).into_color();
@@ -160,6 +205,7 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
         let adjusted = adjust_lightness_for_contrast(
             (*color).into_color(),
             default.background.base.into_color(),
+            4.5,
         );
         let mut score = adjusted.chroma;
         if avoid.iter().any(|c| {
@@ -194,15 +240,7 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
     let accent = Srgb::from_color(accent.1);
     t = t.accent(accent);
 
-    let default_window_bg = Lch::from_color(default.background.base);
-
-    let mut nearest_to_window_bg = find_nearest_lch(default_window_bg, &kmeans.centroids);
-    nearest_to_window_bg =
-        adjust_lightness_for_contrast(nearest_to_window_bg, default.background.on.into_color());
-
-    t = t.bg_color(nearest_to_window_bg.into_color());
-
-    // use most common color for the neutral color
+    // NEUTRAL
     let mut neutral = default.palette.neutral_5;
 
     for c in res {
@@ -220,50 +258,20 @@ fn apply_state(state: &State) -> anyhow::Result<()> {
     let result = BgResult { accent, bg: t.bg_color.unwrap(), neutral: t.neutral_tint.unwrap() };
     let my_config = cosmic_config::Config::new_state(ID, 1)?;
     if let Err(err) = my_config.set(&p, result) {
-        eprintln!("Failed to save the result: {}", err);
+        tracing::error!("Failed to save the result: {}", err);
     }
-    let is_dark_still = match ThemeMode::get_entry(&theme_mode_config) {
-        Ok(entry) => entry.is_dark,
-        Err((errs, entry)) => {
-            for err in errs {
-                eprintln!("Failed to get the current theme mode: {}", err);
-            }
-            entry.is_dark
-        },
-    };
+
     let theme = t.build();
 
     let theme_config = if theme.is_dark { Theme::dark_config() } else { Theme::light_config() }?;
 
     theme.write_entry(&theme_config)?;
 
-    if is_dark_still != default.is_dark {
-        return apply_state(state);
-    }
-
     Ok(())
 }
 
-fn find_nearest_lch(c: Lch, colors: &[Lab]) -> Lch {
-    let mut best = f32::MAX;
-    let mut nearest = c;
-    for color in colors {
-        let mut lch = Lch::from_color(*color);
-        if (lch.l - c.l).abs() > 3. {
-            lch.l = c.l;
-        }
-
-        let score = (c.l - lch.l).abs() + (c.chroma - lch.chroma).abs();
-        if score < best {
-            best = score;
-            nearest = lch;
-        }
-    }
-    nearest
-}
-
 // binary search modifying a's lightness to satisfy contrast with b
-fn adjust_lightness_for_contrast(original: Lch, b: Lch) -> Lch {
+fn adjust_lightness_for_contrast(original: Lch, b: Lch, cutoff: f32) -> Lch {
     let a_luma = SrgbLuma::from_color(original);
     let b_luma = SrgbLuma::from_color(b);
 
@@ -284,7 +292,7 @@ fn adjust_lightness_for_contrast(original: Lch, b: Lch) -> Lch {
             (c, contrast)
         })
         .collect();
-    let filtered = c_arr.iter().filter(|c| c.1 > 4.5).cloned().collect::<Vec<(Lch, f32)>>();
+    let filtered = c_arr.iter().filter(|c| c.1 > cutoff).cloned().collect::<Vec<(Lch, f32)>>();
     filtered
         .into_iter()
         .min_by(|a, b| (a.0.l - original.l).abs().total_cmp(&(b.0.l - original.l).abs()))
@@ -299,27 +307,18 @@ fn adjust_lightness_for_contrast(original: Lch, b: Lch) -> Lch {
         .clone()
 }
 
-fn use_saved_result(path: &str) -> anyhow::Result<()> {
+fn use_saved_result(path: &str, is_dark: bool) -> anyhow::Result<()> {
     let my_config = cosmic_config::Config::new_state(ID, 1)?;
     let result = my_config.get::<BgResult>(path)?;
-    let t = match cosmic_theme::ThemeMode::get_entry(&ThemeMode::config()?) {
-        Ok(entry) => entry,
-        Err((errs, entry)) => {
-            for err in errs {
-                eprintln!("Failed to get the current theme mode: {}", err);
-            }
-            entry
-        },
-    };
 
     let builder_config =
-        if t.is_dark { ThemeBuilder::dark_config()? } else { ThemeBuilder::light_config()? };
+        if is_dark { ThemeBuilder::dark_config()? } else { ThemeBuilder::light_config()? };
 
     let mut t = match ThemeBuilder::get_entry(&builder_config) {
         Ok(entry) => entry,
         Err((errs, entry)) => {
             for err in errs {
-                eprintln!("Failed to get the dark theme: {}", err);
+                tracing::error!("Failed to get the dark theme: {}", err);
             }
             entry
         },

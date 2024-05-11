@@ -54,14 +54,9 @@ install:
 		echo "Updating graphical.target line in the service file..."; \
 		sed -i 's/graphical.target/graphical-session.target/g' $(SERVICE_FILE); \
 		systemctl --user daemon-reload; \
-	else \
-		systemctl daemon-reload; \
-	fi
-
-	@echo "Enabling and starting the service..."
-	if [ "$(SERVICE_DIR)" = "$(HOME)/.config/systemd/user" ]; then \
 		systemctl --user enable --now $(SERVICE_NAME); \
 	else \
+		systemctl daemon-reload; \
 		systemctl enable --now $(SERVICE_FILE); \
 	fi
 
