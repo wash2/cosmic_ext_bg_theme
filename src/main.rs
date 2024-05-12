@@ -2,7 +2,6 @@ use cosmic_bg_config::state::State;
 use cosmic_config::{ConfigGet, ConfigSet, CosmicConfigEntry};
 use cosmic_settings_daemon::{ConfigProxy, CosmicSettingsDaemonProxy};
 use cosmic_theme::{Theme, ThemeBuilder};
-use futures::stream::Stream;
 use futures::StreamExt;
 use image::GenericImageView;
 use kmeans_colors::{get_kmeans, Kmeans, Sort};
@@ -243,7 +242,7 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
     // NEUTRAL
     let mut neutral = default.palette.neutral_5;
 
-    for c in res {
+    for c in &res {
         let c_lch = Lch::from_color(c.centroid);
         if c_lch.chroma > 10. {
             neutral = c_lch.into_color();
@@ -253,13 +252,22 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
 
     t = t.neutral_tint(neutral.into_color());
 
-    t.write_entry(&builder_config)?;
+    // TEXT
+    let text = res.remove(0).centroid;
+    t = t.text_tint(text.into_color());
 
-    let result = BgResult { accent, bg: t.bg_color.unwrap(), neutral: t.neutral_tint.unwrap() };
+    let result = BgResult {
+        accent,
+        bg: t.bg_color.unwrap(),
+        neutral: t.neutral_tint.unwrap(),
+        text: Some(text.into_color()),
+    };
     let my_config = cosmic_config::Config::new_state(ID, 1)?;
     if let Err(err) = my_config.set(&p, result) {
         tracing::error!("Failed to save the result: {}", err);
     }
+
+    t.write_entry(&builder_config)?;
 
     let theme = t.build();
 
@@ -326,6 +334,10 @@ fn use_saved_result(path: &str, is_dark: bool) -> anyhow::Result<()> {
 
     t = t.accent(result.accent).bg_color(result.bg.into_color()).neutral_tint(result.neutral);
 
+    if let Some(text) = result.text {
+        t = t.text_tint(text);
+    }
+
     t.write_entry(&builder_config)?;
 
     let theme = t.build();
@@ -342,4 +354,5 @@ pub struct BgResult {
     pub accent: Srgb,
     pub bg: Srgba,
     pub neutral: Srgb,
+    pub text: Option<Srgb>,
 }
