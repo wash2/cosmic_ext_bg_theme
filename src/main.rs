@@ -185,8 +185,7 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
         new_window_bg.chroma = default_window_bg.chroma + 15.;
         new_window_bg = new_window_bg.clamp();
     }
-    new_window_bg =
-        adjust_lightness_for_contrast(new_window_bg, default.accent.base.into_color(), 6.);
+    new_window_bg.l = default_window_bg.l;
 
     t = t.bg_color(new_window_bg.into_color());
 
