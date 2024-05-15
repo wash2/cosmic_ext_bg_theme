@@ -46,10 +46,15 @@ async fn main() -> anyhow::Result<()> {
         },
     };
 
-    if let Err(err) = apply_state(&state, true) {
-        tracing::error!("Failed to apply the state: {}", err);
-    }
-    if let Err(err) = apply_state(&state, false) {
+    let kmeans = match apply_state(&state, true, None) {
+        Ok(kmeans) => Some(kmeans),
+        Err(err) => {
+            tracing::error!("Failed to apply the state: {}", err);
+            None
+        },
+    };
+
+    if let Err(err) = apply_state(&state, false, kmeans) {
         tracing::error!("Failed to apply the state: {}", err);
     }
     let mut changes = bg_state_proxy.receive_changed().await?;
@@ -83,10 +88,17 @@ async fn main() -> anyhow::Result<()> {
             tracing::error!("Failed to update the state: {}", err);
         }
 
-        if let Err(err) = apply_state(&state, true) {
+        let kmeans = match apply_state(&state, true, None) {
+            Ok(kmeans) => Some(kmeans),
+            Err(err) => {
+                tracing::error!("Failed to apply the state: {}", err);
+                None
+            },
+        };
+        if let Err(err) = apply_state(&state, true, None) {
             tracing::error!("Failed to apply the state: {}", err);
         }
-        if let Err(err) = apply_state(&state, false) {
+        if let Err(err) = apply_state(&state, false, kmeans) {
             tracing::error!("Failed to apply the state: {}", err);
         }
     }
@@ -121,7 +133,11 @@ async fn connect_settings_daemon() -> anyhow::Result<CosmicSettingsDaemonProxy<'
     Err(anyhow::anyhow!("Failed to connect to the settings daemon"))
 }
 
-fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
+fn apply_state(
+    state: &State,
+    is_dark: bool,
+    prev: Option<(Vec<Lab>, Vec<Lab>)>,
+) -> anyhow::Result<(Vec<Lab>, Vec<Lab>)> {
     let Some(w) = state.wallpapers.get(0) else {
         anyhow::bail!("No wallpapers found");
     };
@@ -131,33 +147,44 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
 
     let p = format!("{}_{}", path.to_string_lossy().replace("/", "_"), is_dark);
     if use_saved_result(&p, is_dark).is_ok() {
-        return Ok(());
+        return Ok((Vec::new(), Vec::new()));
     }
 
-    let img: Vec<Lab> = image::open(path)?
-        .pixels()
-        .map(|(_, _, p)| {
-            let p = p.0;
-            let rgb = Srgb::<u8>::new(p[0], p[1], p[2]);
-            rgb.into_format().into_color()
-        })
-        .collect();
+    let (mut centroids, mut res) = match prev {
+        Some((kmeans, res)) if !res.is_empty() => (kmeans, res),
+        _ => {
+            let img: Vec<Lab> = image::open(path)?
+                .pixels()
+                .map(|(_, _, p)| {
+                    let p = p.0;
+                    let rgb = Srgb::<u8>::new(p[0], p[1], p[2]);
+                    rgb.into_format().into_color()
+                })
+                .collect();
 
-    let mut results = Vec::new();
-    let seed = 42;
-    // TODO elbow method
-    let mut best_result = Kmeans::new();
-    for i in 0..2 {
-        let run_result = get_kmeans(8, 40, 10., false, &img, seed + i as u64);
-        if run_result.score < best_result.score {
-            best_result = run_result;
-        }
-    }
-    results.push(best_result);
+            let mut results = Vec::new();
+            let seed = 42;
+            // TODO elbow method
+            let mut best_result = Kmeans::new();
+            for i in 0..2 {
+                let run_result = get_kmeans(8, 40, 10., false, &img, seed + i as u64);
+                if run_result.score < best_result.score {
+                    best_result = run_result;
+                }
+            }
+            results.push(best_result);
 
-    let mut kmeans = results.into_iter().last().unwrap();
-    let mut res = Lab::sort_indexed_colors(&kmeans.centroids, &kmeans.indices);
-    res.sort_unstable_by(|a, b| (b.percentage).total_cmp(&a.percentage));
+            let Some(kmeans) = results.into_iter().last() else {
+                anyhow::bail!("No kmeans result");
+            };
+            let centroids = kmeans.centroids.clone();
+            let mut res = Lab::sort_indexed_colors(&centroids, &kmeans.indices);
+            res.sort_unstable_by(|a, b| (b.percentage).total_cmp(&a.percentage));
+            (centroids, res.into_iter().map(|c| c.centroid).collect::<Vec<Lab>>())
+        },
+    };
+
+    let res_ret = res.clone();
 
     let (builder_config, default) = if is_dark {
         (ThemeBuilder::dark_config()?, Theme::dark_default())
@@ -178,8 +205,8 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
     // BG
     let default_window_bg = Lch::from_color(default.background.base);
 
-    let new_window_bg = res.remove(0).centroid;
-    kmeans.centroids.retain(|c| c != &new_window_bg.into_color());
+    let new_window_bg = res.remove(0);
+    centroids.retain(|c| c != &new_window_bg.into_color());
     let mut new_window_bg: Lch = new_window_bg.into_color();
     if (new_window_bg.chroma - default_window_bg.chroma).abs() > 15. {
         new_window_bg.chroma = default_window_bg.chroma + 15.;
@@ -193,13 +220,16 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
     let clay_brown: Lch = Srgb::new(0.54, 0.38, 0.28).into_color();
     let muddy_brown: Lch = Srgb::new(0.47, 0.34, 0.14).into_color();
     let brown: Lch = Srgb::new(0.56078, 0.40784, 0.17647).into_color();
+    let brown2: Lch = Srgb::new(0.56078, 0.40784, 0.07).into_color();
+    let dark_gold: Lch = Srgb::new(0.651, 0.486, 0.443).into_color();
     let gross_yellow: Lch = Srgb::new(0.439, 0.431, 0.078).into_color();
     let gross_green: Lch = Srgb::new(0.47, 0.51, 0.32).into_color();
-    let avoid = vec![clay_brown, muddy_brown, brown, gross_yellow, gross_green];
+    let avoid = vec![clay_brown, muddy_brown, dark_gold, brown, brown2, gross_yellow, gross_green];
 
-    let mut accent: (Lab, Lch) = (kmeans.centroids[0], kmeans.centroids[0].into_color());
+    let mut accent: (Lab, Lch) = (centroids[0], centroids[0].into_color());
     let mut best = f32::MIN;
-    for color in &kmeans.centroids {
+    for color in &res {
+        let lch_orig = Lch::from_color(*color);
         let adjusted = adjust_lightness_for_contrast(
             (*color).into_color(),
             default.background.base.into_color(),
@@ -211,14 +241,16 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
             (adjusted.chroma - c.chroma).powf(2.) + (hue_diff).powf(2.) < 666. && hue_diff < 20.
         }) {
             score /= 10.;
+        } else if lch_orig.chroma > 60. {
+            accent = (*color, adjusted);
+            break;
         }
         if score > best {
             best = score;
             accent = (*color, adjusted);
         }
     }
-    let max_hue_diff = kmeans
-        .centroids
+    let max_hue_diff = centroids
         .iter()
         .map(|c| {
             let c = Lch::from_color(*c);
@@ -226,12 +258,12 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
         })
         .max_by(|a, b| a.total_cmp(b))
         .unwrap();
-    kmeans.centroids.retain(|c| {
+    centroids.retain(|c| {
         let c = Lch::from_color(*c);
         (c.hue - accent.1.hue).into_inner().abs() > max_hue_diff / 6.
     });
     res.retain(|c| {
-        let c = Lch::from_color(c.centroid);
+        let c = Lch::from_color(*c);
         (c.hue - accent.1.hue).into_inner().abs() > max_hue_diff / 6.
     });
 
@@ -242,7 +274,7 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
     let mut neutral = default.palette.neutral_5;
 
     for c in &res {
-        let c_lch = Lch::from_color(c.centroid);
+        let c_lch = Lch::from_color(*c);
         if c_lch.chroma > 10. {
             neutral = c_lch.into_color();
             break;
@@ -252,7 +284,7 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
     t = t.neutral_tint(neutral.into_color());
 
     // TEXT
-    let text = res.remove(0).centroid;
+    let text = res.remove(0);
     t = t.text_tint(text.into_color());
 
     let result = BgResult {
@@ -274,7 +306,7 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
 
     theme.write_entry(&theme_config)?;
 
-    Ok(())
+    Ok((centroids, res_ret))
 }
 
 // binary search modifying a's lightness to satisfy contrast with b
