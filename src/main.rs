@@ -136,7 +136,7 @@ async fn connect_settings_daemon() -> anyhow::Result<CosmicSettingsDaemonProxy<'
 }
 
 fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
-    let Some(w) = state.wallpapers.get(0) else {
+    let Some(w) = state.wallpapers.first() else {
         anyhow::bail!("No wallpapers found");
     };
     let cosmic_bg_config::Source::Path(ref path) = &w.1 else {
@@ -204,7 +204,7 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
                 let mut avoid_colors = Vec::new();
                 res.retain(|c| {
                     if avoid.iter().any(|a| *a == (*c).into_color()) {
-                        avoid_colors.push(c.clone());
+                        avoid_colors.push(*c);
                         false
                     } else {
                         true
@@ -217,7 +217,7 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
                 res.retain(|c| {
                     let lch = Lch::from_color(*c);
                     if lch.chroma < 10. {
-                        low_chroma.push(c.clone());
+                        low_chroma.push(*c);
                         false
                     } else {
                         true
@@ -270,15 +270,14 @@ fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
                 (new_window_bg.chroma - a.chroma).powf(2.) + (hue_diff).powf(2.) < 666.
                     && hue_diff < 20.
             })
-        {
-            continue;
-        } else if !is_dark
-            && bg_config.avoid_light.iter().any(|a| {
-                let a = Lch::from_color(*a);
-                let hue_diff = (new_window_bg.hue.into_inner() - a.hue.into_inner()).abs() % 180.;
-                (new_window_bg.chroma - a.chroma).powf(2.) + (hue_diff).powf(2.) < 666.
-                    && hue_diff < 20.
-            })
+            || !is_dark
+                && bg_config.avoid_light.iter().any(|a| {
+                    let a = Lch::from_color(*a);
+                    let hue_diff =
+                        (new_window_bg.hue.into_inner() - a.hue.into_inner()).abs() % 180.;
+                    (new_window_bg.chroma - a.chroma).powf(2.) + (hue_diff).powf(2.) < 666.
+                        && hue_diff < 20.
+                })
         {
             continue;
         }
@@ -469,7 +468,6 @@ fn adjust_lightness_for_contrast(original: Lch, b: Lch, cutoff: f32) -> Lch {
     }
 
     let c_arr: Vec<(Lch, f32)> = (0..=40)
-        .into_iter()
         .map(|i| {
             let mut c = original;
             c.l = 100. * i as f32 / 40.;
@@ -493,7 +491,6 @@ fn adjust_lightness_for_contrast(original: Lch, b: Lch, cutoff: f32) -> Lch {
                 .map(|(c, _)| c)
                 .unwrap_or(original)
         })
-        .clone()
 }
 
 fn use_saved_result(path: &str, is_dark: bool) -> anyhow::Result<()> {
@@ -592,7 +589,7 @@ impl Default for MyConfig {
 
 fn left_skewed_shuffle<T>(mut v: Vec<T>, max_len_swap: Option<usize>) -> Vec<T> {
     let mut rng = rand::thread_rng();
-    for i in 0..max_len_swap.unwrap_or_else(|| v.len()) {
+    for i in 0..max_len_swap.unwrap_or(v.len()) {
         let j = rng.gen_range(i..v.len());
         v.swap(i, j);
     }
