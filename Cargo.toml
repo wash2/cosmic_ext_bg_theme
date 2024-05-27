@@ -17,8 +17,9 @@ tracing = "0.1.26"
 tokio = { version = "1.37", features = ["full"] }
 anyhow = "1"
 futures = "0.3"
+rand = "0.8"
 image = "0.25"
-zbus = { version = "3", default-features = false, features = ["tokio"] }
+zbus = { version = "4.2", default-features = false, features = ["tokio"] }
 cosmic-bg-config = { git = "https://github.com/pop-os/cosmic-bg" }
 cosmic-config = { git = "https://github.com/pop-os/libcosmic" }
 cosmic-theme = { git = "https://github.com/pop-os/libcosmic" }
