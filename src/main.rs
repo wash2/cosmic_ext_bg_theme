@@ -47,18 +47,18 @@ async fn main() -> anyhow::Result<()> {
             entry
         },
     };
+    let mut prev_state = None;
 
-    match apply_state(&state, true) {
-        Ok(kmeans) => Some(kmeans),
-        Err(err) => {
-            tracing::error!("Failed to apply the state: {}", err);
-            None
-        },
-    };
-
-    if let Err(err) = apply_state(&state, false) {
+    if let Err(err) = apply_state(prev_state.as_ref(), &state, true) {
         tracing::error!("Failed to apply the state: {}", err);
     }
+
+    if let Err(err) = apply_state(prev_state.as_ref(), &state, false) {
+        tracing::error!("Failed to apply the state: {}", err);
+    }
+
+    prev_state = Some(state.clone());
+
     let mut changes = bg_state_proxy.receive_changed().await?;
 
     let mut ownership_change = settings_proxy.as_ref().receive_owner_changed().await?;
@@ -90,19 +90,20 @@ async fn main() -> anyhow::Result<()> {
             tracing::error!("Failed to update the state: {}", err);
         }
 
-        match apply_state(&state, true) {
+        match apply_state(prev_state.as_ref(), &state, true) {
             Ok(kmeans) => Some(kmeans),
             Err(err) => {
                 tracing::error!("Failed to apply the state: {}", err);
                 None
             },
         };
-        if let Err(err) = apply_state(&state, true) {
+        if let Err(err) = apply_state(prev_state.as_ref(), &state, true) {
             tracing::error!("Failed to apply the state: {}", err);
         }
-        if let Err(err) = apply_state(&state, false) {
+        if let Err(err) = apply_state(prev_state.as_ref(), &state, false) {
             tracing::error!("Failed to apply the state: {}", err);
         }
+        prev_state = Some(state.clone());
     }
 
     Ok(())
@@ -135,8 +136,16 @@ async fn connect_settings_daemon() -> anyhow::Result<CosmicSettingsDaemonProxy<'
     Err(anyhow::anyhow!("Failed to connect to the settings daemon"))
 }
 
-fn apply_state(state: &State, is_dark: bool) -> anyhow::Result<()> {
-    let Some(w) = state.wallpapers.first() else {
+fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyhow::Result<()> {
+    let changed = prev_state
+        .as_ref()
+        .and_then(|prev| {
+            state.wallpapers.iter().find(|(k, v)| {
+                prev.wallpapers.iter().find(|p| &p.0 == k).map_or(true, |prev_v| prev_v.1 != *v)
+            })
+        })
+        .or_else(|| state.wallpapers.first());
+    let Some(w) = changed else {
         anyhow::bail!("No wallpapers found");
     };
     let cosmic_bg_config::Source::Path(ref path) = &w.1 else {
