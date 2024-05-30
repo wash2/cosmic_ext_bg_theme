@@ -6,7 +6,7 @@ After=graphical-session.target
 Type=simple
 ExecStart=/path/to/your/executable
 Restart=always
-RestartSec=5
+RestartSec=300
 
 [Install]
 WantedBy=graphical-session.target
