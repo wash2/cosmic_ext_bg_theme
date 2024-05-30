@@ -1,6 +1,8 @@
+use std::time::Duration;
+
 use cosmic_bg_config::state::State;
 use cosmic_config::cosmic_config_derive::CosmicConfigEntry;
-use cosmic_config::{ConfigGet, ConfigSet, CosmicConfigEntry};
+use cosmic_config::{Config, ConfigGet, ConfigSet, CosmicConfigEntry};
 use cosmic_settings_daemon::{ConfigProxy, CosmicSettingsDaemonProxy};
 use cosmic_theme::{Theme, ThemeBuilder};
 use futures::StreamExt;
@@ -37,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
         .destination(name)?
         .build()
         .await?;
+    let config_context = cosmic_bg_config::context()?;
 
     let mut state = match State::get_entry(&config) {
         Ok(entry) => entry,
@@ -59,6 +62,45 @@ async fn main() -> anyhow::Result<()> {
 
     prev_state = Some(state.clone());
 
+    let mut fail_count = 0;
+    loop {
+        fail_count = match run(
+            &mut prev_state,
+            fail_count,
+            &bg_state_proxy,
+            &settings_proxy,
+            &mut state,
+            &config,
+        )
+        .await
+        {
+            Ok(fail_count) => fail_count,
+            Err(err) => {
+                tracing::error!("Failed to run the main loop: {}", err);
+                fail_count += 1;
+                fail_count
+            },
+        };
+
+        let config_dur =
+            cosmic_bg_config::Config::load(&config_context).map_or(Duration::MAX, |c| {
+                c.backgrounds
+                    .first()
+                    .map_or(Duration::MAX, |b| Duration::from_secs(b.rotation_frequency))
+            });
+        let sleep = Duration::from_secs(2_u64.saturating_pow(fail_count)).min(config_dur);
+        tokio::time::sleep(sleep).await;
+    }
+}
+
+async fn run(
+    prev_state: &mut Option<State>,
+    mut fail_count: u32,
+    bg_state_proxy: &ConfigProxy<'static>,
+    settings_proxy: &CosmicSettingsDaemonProxy<'static>,
+    state: &mut State,
+    config: &Config,
+) -> anyhow::Result<u32> {
     let mut changes = bg_state_proxy.receive_changed().await?;
 
     let mut ownership_change = settings_proxy.as_ref().receive_owner_changed().await?;
@@ -69,7 +111,8 @@ async fn main() -> anyhow::Result<()> {
             c = ownership_change.next() => {
                 if c.is_none() {
                     // The settings daemon has exited
-                    std::process::exit(0);
+                    tracing::error!("The settings daemon has exited");
+                    break;
                 } else {
                     None
                 }
@@ -77,7 +120,10 @@ async fn main() -> anyhow::Result<()> {
         };
         let c = match c {
             Some(c) => c,
-            None => break,
+            None => {
+                tracing::error!("Failed to receive the changes");
+                break;
+            },
         };
         let Ok(args) = c.args() else {
             continue;
@@ -89,6 +135,8 @@ async fn main() -> anyhow::Result<()> {
         for err in errors {
             tracing::error!("Failed to update the state: {}", err);
         }
+
+        fail_count = 0;
 
         match apply_state(prev_state.as_ref(), &state, true) {
             Ok(kmeans) => Some(kmeans),
@@ -103,10 +151,11 @@ async fn main() -> anyhow::Result<()> {
         if let Err(err) = apply_state(prev_state.as_ref(), &state, false) {
             tracing::error!("Failed to apply the state: {}", err);
         }
-        prev_state = Some(state.clone());
+        *prev_state = Some(state.clone());
     }
 
-    Ok(())
+    fail_count += 1;
+    Ok(fail_count)
 }
 
 async fn load_conn() -> anyhow::Result<Connection> {
