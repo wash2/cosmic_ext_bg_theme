@@ -5,8 +5,9 @@ use cosmic_config::cosmic_config_derive::CosmicConfigEntry;
 use cosmic_config::{Config, ConfigGet, ConfigSet, CosmicConfigEntry};
 use cosmic_settings_daemon::{ConfigProxy, CosmicSettingsDaemonProxy};
 use cosmic_theme::{Theme, ThemeBuilder};
+use fast_image_resize::images::Image;
+use fast_image_resize::{IntoImageView, Resizer};
 use futures::StreamExt;
-use image::GenericImageView;
 use kmeans_colors::{get_kmeans, Kmeans, Sort};
 use palette::color_difference::Wcag21RelativeContrast;
 use palette::{Clamp, FromColor, IntoColor, Lab, Lch, Saturate, Srgb, SrgbLuma, Srgba};
@@ -226,12 +227,20 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
         match kmeans_config.as_ref().ok().and_then(|c| c.get::<KmeanState>(&kmeans_p).ok()) {
             Some(res) if !res.0.is_empty() => res.0,
             _ => {
-                let img: Vec<Lab> = image::io::Reader::open(path)?
-                    .with_guessed_format()?
-                    .decode()?
-                    .pixels()
-                    .map(|(_, _, p)| {
-                        let p = p.0;
+                let img = image::io::Reader::open(path)?.with_guessed_format()?.decode()?;
+
+                // resize to width == 256
+                let dst_width = 256;
+                let dst_height =
+                    (dst_width as f32 / img.width() as f32 * img.height() as f32) as u32;
+                let mut dst_image = Image::new(dst_width, dst_height, img.pixel_type().unwrap());
+                let mut resizer = Resizer::new();
+                resizer.resize(&img, &mut dst_image, None)?;
+
+                let img: Vec<Lab> = dst_image
+                    .into_vec()
+                    .chunks(3)
+                    .map(|p| {
                         let rgb = Srgb::<u8>::new(p[0], p[1], p[2]);
                         rgb.into_format().into_color()
                     })

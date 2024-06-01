@@ -8,6 +8,7 @@ name = "cosmic-bg-theme"
 path = "src/main.rs"
 
 [dependencies]
+fast_image_resize = { version = "4.0.0", features = ["image"] }
 tracing-subscriber = { version = "0.3.18", features = [
     "fmt",
     "env-filter",
