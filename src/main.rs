@@ -17,7 +17,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 use zbus::Connection;
 
-const ID: &str = "gay.ash.CosmicBgTheme";
+const ID: &str = "gay.ash.CosmicExtBgTheme";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     log_panics::init();
-    tracing::info!("Starting CosmicBgTheme");
+    tracing::info!("Starting CosmicExtBgTheme");
     let settings_proxy = connect_settings_daemon().await?;
     let config = State::state()?;
     let (path, name) = settings_proxy.watch_state(cosmic_bg_config::NAME, State::version()).await?;
