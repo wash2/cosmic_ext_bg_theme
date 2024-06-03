@@ -1,6 +1,6 @@
 # COSMIC Background Wallpaper
 
-Unofficial service for syncing COSMIC theme with the active wallpaper.
+Unofficial service for syncing the theme with the wallpaper for the COSMIC(tm) desktop.
 
 ## Table of Contents
 
@@ -16,7 +16,7 @@ Unofficial service for syncing COSMIC theme with the active wallpaper.
 
 ## Usage
 
-Run `cosmic-bg-theme` or install the service file `make install-service`
+Run `cosmic-ext-bg-theme` or install the service file `make install-service`
 
 Generated palettes for each wallpaper are saved in `$XDG_STATE_HOME/cosmic/gay.ash.CosmicBgTheme`. You can clear them or edit them to customize the generated values. The suffix of the file name marks them as dark or light palettes. true => dark and false => light
 

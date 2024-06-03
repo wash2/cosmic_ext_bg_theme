@@ -1,7 +1,7 @@
 BIN_DIR := $(HOME)/.local/bin
 SERVICE_DIR := $(HOME)/.config/systemd/user
-SERVICE_NAME := cosmic-bg-theme.service
-BINARY_FILE := cosmic-bg-theme
+SERVICE_NAME := cosmic-ext-bg-theme.service
+BINARY_FILE := cosmic-ext-bg-theme
 BINARY_PATH := $(BIN_DIR)/$(BINARY_FILE)
 SERVICE_FILE := $(SERVICE_DIR)/$(SERVICE_NAME)
 TARGET = debug

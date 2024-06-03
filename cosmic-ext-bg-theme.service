@@ -1,5 +1,5 @@
 [Unit]
-Description=Unofficial service for syncing COSMIC theme with the active wallpaper.
+Description=Unofficial service for syncing the theme with the wallpaper for the COSMIC(tm) desktop.
 After=graphical-session.target
 
 [Service]

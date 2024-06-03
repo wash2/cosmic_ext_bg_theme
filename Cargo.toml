@@ -1,10 +1,10 @@
 [package]
-name = "cosmic_bg_theme"
+name = "cosmic_ext_bg_theme"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "cosmic-bg-theme"
+name = "cosmic-ext-bg-theme"
 path = "src/main.rs"
 
 [dependencies]

@@ -583,7 +583,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cosmic_bg_theme"
+name = "cosmic_ext_bg_theme"
 version = "0.1.0"
 dependencies = [
  "anyhow",
