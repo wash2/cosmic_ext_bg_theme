@@ -139,13 +139,6 @@ async fn run(
 
         fail_count = 0;
 
-        match apply_state(prev_state.as_ref(), &state, true) {
-            Ok(kmeans) => Some(kmeans),
-            Err(err) => {
-                tracing::error!("Failed to apply the state: {}", err);
-                None
-            },
-        };
         if let Err(err) = apply_state(prev_state.as_ref(), &state, true) {
             tracing::error!("Failed to apply the state: {}", err);
         }
@@ -227,7 +220,7 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
         match kmeans_config.as_ref().ok().and_then(|c| c.get::<KmeanState>(&kmeans_p).ok()) {
             Some(res) if !res.0.is_empty() => res.0,
             _ => {
-                let img = image::io::Reader::open(path)?.with_guessed_format()?.decode()?;
+                let img = image::ImageReader::open(path)?.with_guessed_format()?.decode()?;
 
                 // resize to width == 256
                 let dst_width = 256;
@@ -506,12 +499,14 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
     let accent_yellow = t.palette.as_mut().accent_yellow;
     t.palette.as_mut().accent_yellow = sync_chroma_lightness(accent, accent_yellow);
 
+    dbg!(t.bg_color, t.palette.is_dark());
     t.write_entry(&builder_config)?;
 
     let theme = t.build();
 
     let theme_config = if theme.is_dark { Theme::dark_config() } else { Theme::light_config() }?;
-
+    dbg!(theme.is_dark, is_dark);
+    dbg!(theme.bg_color());
     theme.write_entry(&theme_config)?;
 
     Ok(())
@@ -563,6 +558,7 @@ fn adjust_lightness_for_contrast(original: Lch, b: Lch, cutoff: f32) -> Lch {
 fn use_saved_result(path: &str, is_dark: bool) -> anyhow::Result<()> {
     let my_config = cosmic_config::Config::new_state(ID, 1)?;
     let result = my_config.get::<BgResult>(path)?;
+    dbg!("using saved", path, is_dark);
 
     let builder_config =
         if is_dark { ThemeBuilder::dark_config()? } else { ThemeBuilder::light_config()? };
