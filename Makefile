@@ -1,9 +1,12 @@
 BIN_DIR := $(HOME)/.local/bin
 SERVICE_DIR := $(HOME)/.config/systemd/user
 SERVICE_NAME := cosmic-ext-bg-theme.service
+DESKTOP_NAME := cosmic.ext.BgTheme.desktop
 BINARY_FILE := cosmic-ext-bg-theme
 BINARY_PATH := $(BIN_DIR)/$(BINARY_FILE)
 SERVICE_FILE := $(SERVICE_DIR)/$(SERVICE_NAME)
+DESKTOP_FILE := $(HOME)/.local/share/applications
+DESKTOP_PATH := $(DESKTOP_FILE)/$(DESKTOP_NAME)
 TARGET = debug
 DEBUG ?= 0
 TOOLCHAIN ?= stable
@@ -42,8 +45,9 @@ endif
 install:
 	@echo "Installing executable to $(BIN_DIR)..."
 	install -D -m 755 "target/$(TARGET)/$(BINARY_FILE)" "$(BINARY_PATH)"
+	install -D -m 644 "res/$(DESKTOP_NAME)" "$(DESKTOP_PATH)"
 
-	@echo "Cosmic Background Theme installed and service started successfully!"
+	@echo "Cosmic Background Theme installed"
 
 uninstall:
 	@echo "Disabling and stopping the service..."
@@ -63,7 +67,7 @@ install-service:
 
 	@echo "Updating ExecStart line in the service file..."
 	sed -i "s|ExecStart=.*|ExecStart=$(BINARY_PATH)|g" $(SERVICE_FILE)
-	
+
 	@echo "Reloading systemd user units..."
 	echo "Updating graphical.target line in the service file..."; \
 	systemctl --user daemon-reload; \

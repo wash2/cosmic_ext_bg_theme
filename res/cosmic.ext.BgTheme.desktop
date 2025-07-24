@@ -1,0 +1,9 @@
+#TODO: more build-out, desktop actions, translations?
+[Desktop Entry]
+Name=COSMIC Ext Background Theme
+Exec=cosmic-ext-bg-theme
+Terminal=false
+Type=Application
+StartupNotify=true
+Icon=applications-utilities-symbolic
+Categories=COSMIC;Utility;
