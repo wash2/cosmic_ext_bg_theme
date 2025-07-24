@@ -17,7 +17,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 use zbus::Connection;
 
-const ID: &str = "gay.ash.CosmicExtBgTheme";
+const ID: &str = "cosmic.ext.BgTheme";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -418,14 +418,15 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
     t = t.neutral_tint(neutral.into_color());
 
     // TEXT
-    let text = res.remove(0);
-    t = t.text_tint(text.into_color());
+    if !res.is_empty() {
+        t = t.text_tint(res.remove(0).into_color());
+    };
 
     let result = BgResult {
         accent,
         bg: t.bg_color.unwrap(),
         neutral: t.neutral_tint.unwrap(),
-        text: Some(text.into_color()),
+        text: t.text_tint.map(|c| c.into_color()),
     };
     if bg_config.save_results {
         let my_config = cosmic_config::Config::new_state(ID, 1)?;
@@ -499,14 +500,11 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
     let accent_yellow = t.palette.as_mut().accent_yellow;
     t.palette.as_mut().accent_yellow = sync_chroma_lightness(accent, accent_yellow);
 
-    dbg!(t.bg_color, t.palette.is_dark());
     t.write_entry(&builder_config)?;
 
     let theme = t.build();
 
     let theme_config = if theme.is_dark { Theme::dark_config() } else { Theme::light_config() }?;
-    dbg!(theme.is_dark, is_dark);
-    dbg!(theme.bg_color());
     theme.write_entry(&theme_config)?;
 
     Ok(())
@@ -558,7 +556,6 @@ fn adjust_lightness_for_contrast(original: Lch, b: Lch, cutoff: f32) -> Lch {
 fn use_saved_result(path: &str, is_dark: bool) -> anyhow::Result<()> {
     let my_config = cosmic_config::Config::new_state(ID, 1)?;
     let result = my_config.get::<BgResult>(path)?;
-    dbg!("using saved", path, is_dark);
 
     let builder_config =
         if is_dark { ThemeBuilder::dark_config()? } else { ThemeBuilder::light_config()? };
@@ -652,7 +649,11 @@ impl Default for MyConfig {
 
 fn left_skewed_shuffle<T>(mut v: Vec<T>, max_len_swap: Option<usize>) -> Vec<T> {
     let mut rng = rand::thread_rng();
-    for i in 0..max_len_swap.unwrap_or(v.len()) {
+    let max_i = max_len_swap.unwrap_or(v.len());
+    for i in 0..max_i {
+        if i >= v.len() {
+            return v;
+        }
         let j = rng.gen_range(i..v.len());
         v.swap(i, j);
     }
