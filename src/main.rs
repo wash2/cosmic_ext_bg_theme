@@ -516,7 +516,8 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
 
     let theme = t.build();
 
-    let theme_config = if theme.is_dark { Theme::dark_config() } else { Theme::light_config() }?;
+    let theme_config = if is_dark { Theme::dark_config() } else { Theme::light_config() }?;
+
     theme.write_entry(&theme_config)?;
 
     Ok(())
