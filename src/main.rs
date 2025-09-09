@@ -8,19 +8,24 @@ use cosmic_theme::{Theme, ThemeBuilder};
 use fast_image_resize::images::Image;
 use fast_image_resize::{IntoImageView, Resizer};
 use futures::StreamExt;
-use kmeans_colors::{get_kmeans, Kmeans, Sort};
+use kmeans_colors::{Kmeans, Sort, get_kmeans};
 use palette::color_difference::Wcag21RelativeContrast;
 use palette::{Clamp, FromColor, IntoColor, Lab, Lch, Saturate, Srgb, SrgbLuma, Srgba};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 use zbus::Connection;
 
 const ID: &str = "cosmic.ext.BgTheme";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().nth(1).is_some_and(|a| a.as_str() != "--no-daemon") {
+        println!("Usage: cosmic-ext-bg-theme [OPTIONAL --no-daemon]");
+        println!("--no-daemon will exit immediately after setting the theme");
+        std::process::exit(1);
+    }
     let fmt_layer = fmt::layer().with_target(false);
     let filter_layer =
         EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("info")).unwrap();
@@ -32,14 +37,8 @@ async fn main() -> anyhow::Result<()> {
 
     log_panics::init();
     tracing::info!("Starting CosmicExtBgTheme");
-    let settings_proxy = connect_settings_daemon().await?;
+
     let config = State::state()?;
-    let (path, name) = settings_proxy.watch_state(cosmic_bg_config::NAME, State::version()).await?;
-    let bg_state_proxy = ConfigProxy::builder(settings_proxy.as_ref().connection())
-        .path(path)?
-        .destination(name)?
-        .build()
-        .await?;
     let config_context = cosmic_bg_config::context()?;
 
     let mut state = match State::get_entry(&config) {
@@ -51,6 +50,8 @@ async fn main() -> anyhow::Result<()> {
             entry
         },
     };
+
+    if std::env::args().nth(1).is_some_and(|a| a.as_str() == "--no-daemon") {}
     let mut prev_state = None;
 
     if let Err(err) = apply_state(prev_state.as_ref(), &state, true) {
@@ -60,6 +61,17 @@ async fn main() -> anyhow::Result<()> {
     if let Err(err) = apply_state(prev_state.as_ref(), &state, false) {
         tracing::error!("Failed to apply the state: {}", err);
     }
+    if std::env::args().nth(1).is_some_and(|a| a.as_str() == "--no-daemon") {
+        std::process::exit(0);
+    }
+
+    let settings_proxy = connect_settings_daemon().await?;
+    let (path, name) = settings_proxy.watch_state(cosmic_bg_config::NAME, State::version()).await?;
+    let bg_state_proxy = ConfigProxy::builder(settings_proxy.as_ref().connection())
+        .path(path)?
+        .destination(name)?
+        .build()
+        .await?;
 
     prev_state = Some(state.clone());
 
@@ -191,7 +203,7 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
     let Some(w) = changed else {
         anyhow::bail!("No wallpapers found");
     };
-    let cosmic_bg_config::Source::Path(ref path) = &w.1 else {
+    let cosmic_bg_config::Source::Path(path) = &w.1 else {
         anyhow::bail!("No wallpaper path");
     };
 
@@ -648,13 +660,13 @@ impl Default for MyConfig {
 }
 
 fn left_skewed_shuffle<T>(mut v: Vec<T>, max_len_swap: Option<usize>) -> Vec<T> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let max_i = max_len_swap.unwrap_or(v.len());
     for i in 0..max_i {
         if i >= v.len() {
             return v;
         }
-        let j = rng.gen_range(i..v.len());
+        let j = rng.random_range(i..v.len());
         v.swap(i, j);
     }
     v

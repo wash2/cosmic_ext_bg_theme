@@ -3,7 +3,7 @@ debian/*
 !debian/changelog
 !debian/control
 !debian/copyright
-!debian/cosmic-bg-theme.install
+!debian/cosmic-ext-bg-theme.install
 !debian/postinst
 !debian/rules
 !debian/source
