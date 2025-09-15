@@ -1,15 +1,11 @@
 BIN_DIR := $(HOME)/.local/bin
-SERVICE_DIR := $(HOME)/.config/systemd/user
-SERVICE_NAME := cosmic-ext-bg-theme.service
 DESKTOP_NAME := cosmic.ext.BgTheme.desktop
 BINARY_FILE := cosmic-ext-bg-theme
 BINARY_PATH := $(BIN_DIR)/$(BINARY_FILE)
-SERVICE_FILE := $(SERVICE_DIR)/$(SERVICE_NAME)
 DESKTOP_FILE := $(HOME)/.local/share/applications
 DESKTOP_PATH := $(DESKTOP_FILE)/$(DESKTOP_NAME)
 TARGET = debug
 DEBUG ?= 0
-TOOLCHAIN ?= stable
 
 VENDOR ?= 0
 ifneq ($(VENDOR),0)
@@ -22,7 +18,7 @@ ifeq ($(DEBUG),0)
 endif
 
 all: extract-vendor
-	cargo +$(TOOLCHAIN) build $(ARGS)
+	cargo build $(ARGS)
 
 clean:
 	cargo clean
@@ -50,29 +46,11 @@ install:
 	@echo "Cosmic Background Theme installed"
 
 uninstall:
-	@echo "Disabling and stopping the service..."
-	systemctl --user disable --now $(SERVICE_NAME);
 
-	@echo "Removing executable and systemd service file..."
-	rm -f $(BINARY_PATH) $(SERVICE_FILE)
-
-	@echo "Reloading systemd user units..."
-	systemctl --user daemon-reload;
+	@echo "Removing executable..."
+	rm -f $(BINARY_PATH)
 
 	@echo "Cosmic Background Theme uninstalled successfully!"
 
-install-service:
-	@echo "Installing systemd service file to $(SERVICE_DIR)..."
-	install -D -m 644 $(SERVICE_NAME) $(SERVICE_FILE)
+.PHONY = all clean install uninstall vendor
 
-	@echo "Updating ExecStart line in the service file..."
-	sed -i "s|ExecStart=.*|ExecStart=$(BINARY_PATH)|g" $(SERVICE_FILE)
-
-	@echo "Reloading systemd user units..."
-	echo "Updating graphical.target line in the service file..."; \
-	systemctl --user daemon-reload; \
-	systemctl --user enable --now $(SERVICE_NAME); \
-
-	@echo "Cosmic Background Theme service installed and started successfully!"
-
-.PHONY = all clean install install-service uninstall vendor
