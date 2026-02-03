@@ -244,7 +244,7 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
 
                 let img: Vec<Lab> = dst_image
                     .into_vec()
-                    .chunks(3)
+                    .chunks_exact(3)
                     .map(|p| {
                         let rgb = Srgb::<u8>::new(p[0], p[1], p[2]);
                         rgb.into_format().into_color()
@@ -358,9 +358,17 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
 
         t = t.bg_color(new_window_bg.into_color());
 
+        let mut res_len = res.len();
         res.retain(|c| {
             let c = Lch::from_color(*c);
-            (c.hue - new_window_bg.hue).into_inner().abs() > 10.
+            let keep = (c.hue - new_window_bg.hue).into_inner().abs() > 10.;
+
+            if res_len == 2 || keep {
+                true
+            } else {
+                res_len -= 1;
+                false
+            }
         });
         break;
     }
@@ -406,9 +414,17 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
         .max_by(|a, b| a.total_cmp(b))
         .unwrap();
 
+    let mut res_len = res.len();
     res.retain(|c| {
         let c = Lch::from_color(*c);
-        (c.hue - accent.1.hue).into_inner().abs() > max_hue_diff / 6.
+        let keep = (c.hue - accent.1.hue).into_inner().abs() > max_hue_diff / 6.;
+
+        if res_len == 2 || keep {
+            true
+        } else {
+            res_len -= 1;
+            false
+        }
     });
 
     let accent = Srgb::from_color(accent.1);
