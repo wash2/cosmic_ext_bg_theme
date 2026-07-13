@@ -326,7 +326,7 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
     };
 
     // BG
-    let default_window_bg = Lch::from_color(default.background.base);
+    let default_window_bg = Lch::from_color(default.background(false).base);
 
     for c in &res {
         // make sure not in avoid after adjusting
@@ -386,7 +386,7 @@ fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyh
         let lch_orig = Lch::from_color(*color);
         let adjusted = adjust_lightness_for_contrast(
             (*color).into_color(),
-            default.background.base.into_color(),
+            default.background(false).base.into_color(),
             4.5,
         );
         let mut score = adjusted.chroma;
