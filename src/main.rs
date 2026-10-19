@@ -192,14 +192,19 @@ async fn connect_settings_daemon() -> anyhow::Result<CosmicSettingsDaemonProxy<'
 }
 
 fn apply_state(prev_state: Option<&State>, state: &State, is_dark: bool) -> anyhow::Result<()> {
+    let real_wallpapers = state
+        .wallpapers
+        .iter()
+        .filter(|wallpaper| !wallpaper.0.starts_with("X11"))
+        .collect::<Vec<_>>();
     let changed = prev_state
         .as_ref()
         .and_then(|prev| {
-            state.wallpapers.iter().find(|(k, v)| {
+            real_wallpapers.iter().find(|(k, v)| {
                 prev.wallpapers.iter().find(|p| &p.0 == k).map_or(true, |prev_v| prev_v.1 != *v)
             })
         })
-        .or_else(|| state.wallpapers.first());
+        .or_else(|| real_wallpapers.first());
     let Some(w) = changed else {
         anyhow::bail!("No wallpapers found");
     };
